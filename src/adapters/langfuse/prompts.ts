@@ -84,7 +84,7 @@ export async function updatePromptLabels(
   const res = await fetch(url, {
     method: "PATCH",
     headers: { Authorization: auth, "Content-Type": "application/json" },
-    body: JSON.stringify({ labels }),
+    body: JSON.stringify({ newLabels: labels }),
   });
 
   if (!res.ok) {

@@ -9,23 +9,36 @@ type LfTrace = z.infer<typeof LfTraceSchema>;
 export async function fetchTraces(
   input: ListFailingTracesInput,
 ): Promise<NormalizedTrace[]> {
-  const params: Record<string, string> = {
-    page: "1",
-    limit: String(input.limit ?? 100),
-  };
+  const totalLimit = input.limit ?? 100;
+  const pageSize = Math.min(totalLimit, 100); // Langfuse API max is 100
+  const results: NormalizedTrace[] = [];
 
-  if (input.filters?.trace_name?.length) {
-    params.name = input.filters.trace_name[0];
+  for (let page = 1; results.length < totalLimit; page++) {
+    const params: Record<string, string> = {
+      page: String(page),
+      limit: String(pageSize),
+    };
+
+    if (input.filters?.trace_name?.length) {
+      params.name = input.filters.trace_name[0];
+    }
+    if (input.time_from) params.fromTimestamp = input.time_from;
+    if (input.time_to) params.toTimestamp = input.time_to;
+
+    logger.info({ params }, "Fetching traces from Langfuse");
+
+    const raw = await lfGet<unknown>("/traces", params);
+    const res = LfTraceListResponseSchema.parse(raw);
+
+    for (const t of res.data) {
+      results.push(toNormalized(t, input));
+    }
+
+    // No more pages
+    if (res.data.length < pageSize || page >= res.meta.totalPages) break;
   }
-  if (input.time_from) params.fromTimestamp = input.time_from;
-  if (input.time_to) params.toTimestamp = input.time_to;
 
-  logger.info({ params }, "Fetching traces from Langfuse");
-
-  const raw = await lfGet<unknown>("/traces", params);
-  const res = LfTraceListResponseSchema.parse(raw);
-
-  return res.data.map((t) => toNormalized(t, input));
+  return results.slice(0, totalLimit);
 }
 
 function toNormalized(t: LfTrace, input: ListFailingTracesInput): NormalizedTrace {
