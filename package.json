@@ -1,0 +1,37 @@
+{
+  "name": "trace-to-fix-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that turns Langfuse traces into actionable fix plans and GitHub issue drafts",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "trace-to-fix-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && cp src/storage/schema.sql dist/storage/schema.sql",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@octokit/rest": "^22.0.1",
+    "sql.js": "^1.14.1",
+    "langfuse": "^3.38.20",
+    "pino": "^9.6.0",
+    "yaml": "^2.7.1",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
