@@ -265,6 +265,54 @@ export const RecurrenceReportSchema = z.object({
   })),
 });
 
+// ─── Phase 2: Write Operation Schemas ──────────────────────────
+
+export const PromptFixContextSchema = z.object({
+  current_prompt: z.object({
+    name: z.string().min(1),
+    version: z.number().int().min(0),
+    content: z.unknown(),
+    type: z.enum(["text", "chat"]),
+    config: z.record(z.unknown()),
+  }),
+  diagnosis: z.object({
+    cluster_summary: z.string(),
+    symptoms: z.array(z.string()),
+    root_causes: z.array(z.string()),
+    recommended_actions: z.array(z.string()),
+  }),
+  suggested_changes: z.array(z.string()),
+});
+
+export const EvalDatasetResultSchema = z.object({
+  dataset_name: z.string().min(1),
+  item_count: z.number().int().min(0),
+  items: z.array(z.object({
+    id: z.string(),
+    datasetName: z.string(),
+    input: z.unknown(),
+    expectedOutput: z.unknown(),
+    metadata: z.record(z.unknown()),
+    sourceTraceId: z.string().nullable(),
+    sourceObservationId: z.string().nullable(),
+  })),
+});
+
+export const AutofixReportSchema = z.object({
+  trace_count: z.number().int().min(0),
+  baseline_trace_count: z.number().int().min(0),
+  regression: RegressionReportSchema.nullable(),
+  clusters: z.array(FailureClusterSchema),
+  top_cluster: FailureClusterSchema.nullable(),
+  chain_analysis: z.unknown().nullable(),
+  cost_quality: CostQualityReportSchema.nullable(),
+  fix_plan: FixPlanSchema.nullable(),
+  prompt_fix_context: PromptFixContextSchema.nullable(),
+  eval_dataset: EvalDatasetResultSchema.nullable(),
+  summary: z.string(),
+  next_steps: z.array(z.string()),
+});
+
 // ─── Domain Invariant Validators ────────────────────────────────
 
 export function assertValidCluster(data: unknown): z.infer<typeof FailureClusterSchema> {

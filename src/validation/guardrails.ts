@@ -302,6 +302,61 @@ export function validateRecurrenceOutput(report: RecurrenceReport): GuardrailRes
   return { valid: errors.length === 0, errors, warnings };
 }
 
+// ─── Phase 2: Write Operation Guardrails ───────────────────────
+
+import type { PromptFixContext } from "../actions/promptFix.js";
+import type { EvalDatasetResult } from "../actions/evalRunner.js";
+import type { AutofixReport } from "../actions/autofix.js";
+
+/** Validate prompt fix context */
+export function validatePromptFixContext(ctx: PromptFixContext): GuardrailResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!ctx.current_prompt.name) errors.push("prompt name is empty");
+  if (ctx.suggested_changes.length === 0) {
+    warnings.push("수정 제안이 없음 — 프롬프트 문제가 아닐 수 있습니다");
+  }
+  if (ctx.diagnosis.root_causes.length === 0) {
+    warnings.push("원인 가설이 없음 — 진단 데이터 부족");
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+/** Validate eval dataset creation result */
+export function validateEvalDatasetResult(result: EvalDatasetResult): GuardrailResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!result.dataset_name) errors.push("dataset name is empty");
+  if (result.item_count === 0) {
+    warnings.push("데이터셋에 항목이 없음 — trace에서 input/output 추출 실패 가능성");
+  }
+  if (result.item_count !== result.items.length) {
+    errors.push(`item_count (${result.item_count}) != items.length (${result.items.length})`);
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+/** Validate autofix report */
+export function validateAutofixReport(report: AutofixReport): GuardrailResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (report.trace_count === 0) {
+    warnings.push("분석할 trace가 없음");
+  }
+  if (report.clusters.length === 0 && report.trace_count > 0) {
+    warnings.push("실패 클러스터가 생성되지 않음 — 모든 trace가 정상이거나 클러스터링 기준 미달");
+  }
+  if (!report.summary) errors.push("summary is empty");
+  if (report.next_steps.length === 0) errors.push("next_steps is empty");
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
 /**
  * Wrap a tool handler with guardrail validation.
  * If validation fails, the error is logged and returned to the user,

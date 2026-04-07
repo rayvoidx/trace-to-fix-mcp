@@ -99,9 +99,21 @@ cp .env.example .env
 | `lf_detect_recurrence` | 이전에 해결된 실패 패턴의 재발 감지 |
 | `lf_resolve_cluster` | 클러스터를 해결 완료로 표시 (재발 추적용) |
 
+### 쓰기 & 자동화 (Closed Loop)
+
+| 도구 | 설명 |
+|---|---|
+| `lf_create_prompt_version` | Langfuse에 프롬프트 새 버전 생성 |
+| `lf_promote_prompt` | 프롬프트를 production 라벨로 승격 |
+| `lf_create_eval_dataset` | 실패 trace에서 평가 데이터셋 자동 생성 |
+| `lf_record_score` | trace에 평가 점수 기록 |
+| `lf_run_eval` | 프롬프트 수정 컨텍스트 생성 (현재 프롬프트 + 진단 결과) |
+| `lf_autofix` | 전체 파이프라인 자동 실행 (진단→분석→수정계획→데이터셋) |
+
 ## 일반적인 분석 흐름
 
 ```
+# 단계별 수동 실행
 1. lf_list_failing_traces        → 실패 trace 수집
 2. lf_detect_regression          → 최근 품질 변화 확인
 3. lf_group_failure_patterns     → 패턴별 그룹화
@@ -109,7 +121,13 @@ cp .env.example .env
 5. lf_compare_prompt_versions    → 프롬프트 버전 비교
 6. lf_analyze_cost_quality       → 비용 최적화 기회 탐색
 7. lf_suggest_fix_plan           → 수정 계획 생성
-8. gh_create_issue_draft         → GitHub 이슈 초안
+8. lf_run_eval                   → 프롬프트 수정 컨텍스트 생성
+9. lf_create_prompt_version      → 수정된 프롬프트 배포
+10. lf_create_eval_dataset       → 평가 데이터셋 생성
+11. gh_create_issue_draft        → GitHub 이슈 초안
+
+# 또는 한 번에 자동 실행
+lf_autofix → 1~7단계를 자동으로 실행하고 결과 보고
 ```
 
 ## 개발
