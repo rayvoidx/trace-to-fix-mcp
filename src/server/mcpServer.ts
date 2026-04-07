@@ -23,6 +23,13 @@ import { analyzeCostQuality } from "../diagnosis/costQuality.js";
 import { detectRecurrence } from "../diagnosis/recurrence.js";
 import { markClusterResolved } from "../storage/clusterHistory.js";
 
+// ─── Phase 2: Write & Actions ──────────────────────────────────
+import { createPromptVersion, promoteToProduction } from "../adapters/langfuse/prompts.js";
+import { recordScore } from "../adapters/langfuse/scoring.js";
+import { buildPromptFixContext } from "../actions/promptFix.js";
+import { createEvalDatasetFromTraces } from "../actions/evalRunner.js";
+import { runAutofix } from "../actions/autofix.js";
+
 // ─── Harness Engineering: 피드백 루프 & 관찰 ───────────────────
 import { telemetry } from "../observability/telemetry.js";
 import { selfTrace } from "../observability/selfTrace.js";
@@ -693,6 +700,248 @@ export function createServer(): McpServer {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: false, error: msg });
+      throw err;
+    }
+  });
+
+  // ─── Phase 2: Write & Action Tools ────────────────────────────────
+
+  server.registerTool("lf_create_prompt_version", {
+    title: "Create Prompt Version",
+    description:
+      "Langfuse에 프롬프트 새 버전을 생성합니다.",
+    inputSchema: {
+      name: z.string().describe("프롬프트 이름"),
+      type: z.enum(["text", "chat"]).describe("프롬프트 유형"),
+      prompt: z.string().describe("프롬프트 내용 (text일 경우 문자열, chat일 경우 JSON 문자열)"),
+      labels: z.array(z.string()).optional().describe("라벨 (예: ['staging'])"),
+      config: z.string().optional().describe("설정 JSON (model, temperature 등)"),
+    },
+  }, async (args) => {
+    const toolName = "lf_create_prompt_version";
+    const startedAt = Date.now();
+
+    try {
+      const result = await selfTrace(toolName, { args }, async () => {
+        const promptContent = args.type === "chat" ? JSON.parse(args.prompt) : args.prompt;
+        const config = args.config ? JSON.parse(args.config) : undefined;
+
+        return createPromptVersion({
+          name: args.name,
+          type: args.type,
+          prompt: promptContent,
+          labels: args.labels,
+          config,
+        });
+      });
+
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: true });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: false, error: msg });
+      throw err;
+    }
+  });
+
+  server.registerTool("lf_promote_prompt", {
+    title: "Promote Prompt to Production",
+    description:
+      "프롬프트 특정 버전을 production 라벨로 승격합니다.",
+    inputSchema: {
+      name: z.string().describe("프롬프트 이름"),
+      version: z.number().int().describe("승격할 버전 번호"),
+    },
+  }, async (args) => {
+    const toolName = "lf_promote_prompt";
+    const startedAt = Date.now();
+
+    try {
+      const result = await selfTrace(toolName, { args }, async () => {
+        return promoteToProduction(args.name, args.version);
+      });
+
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: true });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: false, error: msg });
+      throw err;
+    }
+  });
+
+  server.registerTool("lf_create_eval_dataset", {
+    title: "Create Eval Dataset",
+    description:
+      "실패 trace에서 평가 데이터셋을 자동 생성합니다. 각 trace의 input/output이 데이터셋 항목이 됩니다.",
+    inputSchema: {
+      dataset_name: z.string().describe("생성할 데이터셋 이름"),
+      cluster_id: z.string().optional().describe("대상 cluster ID (지정 시 해당 클러스터의 trace만)"),
+      trace_ids: z.array(z.string()).optional().describe("직접 지정할 trace ID 목록"),
+    },
+  }, async (args) => {
+    const toolName = "lf_create_eval_dataset";
+    circuitBreaker.check(toolName);
+    const startedAt = Date.now();
+
+    try {
+      const result = await selfTrace(toolName, { args }, async () => {
+        let traces: NormalizedTrace[] = [];
+
+        if (args.cluster_id) {
+          const clusterData = await getCluster(args.cluster_id) as FailureCluster | null;
+          if (!clusterData) {
+            return { error: `Cluster ${args.cluster_id}를 찾을 수 없습니다.` };
+          }
+          // Get traces from cache that match cluster trace_ids
+          const cachedList = await cacheGet("trace_list", "latest") as NormalizedTrace[] | null;
+          if (cachedList) {
+            traces = cachedList.filter((t) => clusterData.trace_ids.includes(t.trace_id));
+          }
+        } else if (args.trace_ids?.length) {
+          const cachedList = await cacheGet("trace_list", "latest") as NormalizedTrace[] | null;
+          if (cachedList) {
+            traces = cachedList.filter((t) => args.trace_ids!.includes(t.trace_id));
+          }
+        }
+
+        if (traces.length === 0) {
+          return { error: "대상 trace를 찾을 수 없습니다. 먼저 lf_list_failing_traces를 실행하세요." };
+        }
+
+        const cluster = args.cluster_id
+          ? await getCluster(args.cluster_id) as FailureCluster | undefined
+          : undefined;
+
+        return createEvalDatasetFromTraces(args.dataset_name, traces, cluster);
+      });
+
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: true });
+      circuitBreaker.recordSuccess(toolName);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: false, error: msg });
+      circuitBreaker.recordFailure(toolName, msg);
+      throw err;
+    }
+  });
+
+  server.registerTool("lf_record_score", {
+    title: "Record Score",
+    description:
+      "trace에 평가 점수를 기록합니다.",
+    inputSchema: {
+      trace_id: z.string().describe("대상 trace ID"),
+      observation_id: z.string().optional().describe("대상 observation ID"),
+      name: z.string().describe("점수 이름 (예: correctness, faithfulness)"),
+      value: z.number().describe("점수 값"),
+      data_type: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).optional().default("NUMERIC"),
+      comment: z.string().optional().describe("코멘트"),
+    },
+  }, async (args) => {
+    const toolName = "lf_record_score";
+    const startedAt = Date.now();
+
+    try {
+      const result = await selfTrace(toolName, { args }, async () => {
+        return recordScore({
+          traceId: args.trace_id,
+          observationId: args.observation_id,
+          name: args.name,
+          value: args.value,
+          dataType: args.data_type,
+          comment: args.comment,
+        });
+      });
+
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: true });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: false, error: msg });
+      throw err;
+    }
+  });
+
+  server.registerTool("lf_run_eval", {
+    title: "Run Evaluation",
+    description:
+      "프롬프트 수정 컨텍스트를 생성합니다. 현재 프롬프트 + 진단 결과를 조합하여 수정 지침을 제공합니다.",
+    inputSchema: {
+      prompt_name: z.string().describe("Langfuse 프롬프트 이름"),
+      cluster_id: z.string().describe("진단 대상 cluster ID"),
+    },
+    annotations: { readOnlyHint: true },
+  }, async (args) => {
+    const toolName = "lf_run_eval";
+    circuitBreaker.check(toolName);
+    const startedAt = Date.now();
+
+    try {
+      const result = await selfTrace(toolName, { args }, async () => {
+        const clusterData = await getCluster(args.cluster_id) as FailureCluster | null;
+        if (!clusterData) {
+          return { error: `Cluster ${args.cluster_id}를 찾을 수 없습니다.` };
+        }
+
+        const fixPlanData = await cacheGet("fix_plan", args.cluster_id) as FixPlan | null;
+
+        return buildPromptFixContext(args.prompt_name, clusterData, fixPlanData);
+      });
+
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: true });
+      circuitBreaker.recordSuccess(toolName);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: false, error: msg });
+      circuitBreaker.recordFailure(toolName, msg);
+      throw err;
+    }
+  });
+
+  server.registerTool("lf_autofix", {
+    title: "Autofix",
+    description:
+      "진단→클러스터링→회귀탐지→체인분석→비용분석→수정계획→데이터셋 생성까지 전체 파이프라인을 자동 실행합니다.",
+    inputSchema: {
+      time_from: z.string().describe("분석 시작 시간 (ISO 8601)"),
+      time_to: z.string().describe("분석 종료 시간 (ISO 8601)"),
+      baseline_from: z.string().optional().describe("베이스라인 시작 (미입력 시 동일 길이 직전 기간)"),
+      baseline_to: z.string().optional().describe("베이스라인 종료"),
+      trace_name: z.string().optional().describe("Trace name 필터"),
+      prompt_name: z.string().optional().describe("프롬프트 이름 (수정 컨텍스트 생성용)"),
+      create_dataset: z.boolean().optional().default(false).describe("true면 실패 trace에서 eval 데이터셋 자동 생성"),
+      max_traces: z.number().optional().default(200).describe("최대 분석 trace 수"),
+    },
+    annotations: { readOnlyHint: true },
+  }, async (args) => {
+    const toolName = "lf_autofix";
+    circuitBreaker.check(toolName);
+    const startedAt = Date.now();
+
+    try {
+      const result = await selfTrace(toolName, { args }, async () => {
+        return runAutofix({
+          time_from: args.time_from,
+          time_to: args.time_to,
+          baseline_from: args.baseline_from,
+          baseline_to: args.baseline_to,
+          trace_name: args.trace_name,
+          prompt_name: args.prompt_name,
+          create_dataset: args.create_dataset,
+          max_traces: args.max_traces,
+        });
+      });
+
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: true });
+      circuitBreaker.recordSuccess(toolName);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      telemetry.record({ tool: toolName, startedAt, endedAt: Date.now(), success: false, error: msg });
+      circuitBreaker.recordFailure(toolName, msg);
       throw err;
     }
   });

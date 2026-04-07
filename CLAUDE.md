@@ -66,15 +66,28 @@ Langfuse 트레이스를 분석하여 장애 클러스터링, 원인 진단, 수
 ```
 src/
   adapters/          # 외부 시스템 연동 (Langfuse, GitHub)
-    langfuse/        # Langfuse API 클라이언트 및 데이터 조회
+    langfuse/        # Langfuse API 연동 (읽기 + 쓰기)
+      traces.ts      # trace 조회 (Zod 검증 적용)
+      observations.ts # observation 조회
+      scores.ts      # score 조회
+      prompts.ts     # 프롬프트 CRUD (Phase 2)
+      datasets.ts    # 데이터셋 CRUD (Phase 2)
+      scoring.ts     # 점수 기록 (Phase 2)
     github/          # GitHub Issues 클라이언트
   diagnosis/         # 핵심 분석 로직
-    normalize.ts     # 트레이스 정규화
     clustering.ts    # 장애 클러스터링
     heuristics.ts    # 휴리스틱 기반 원인 분석
-    candidate.ts     # 후보 생성
-    fixPlan.ts       # 수정 계획 생성
+    regression.ts    # 시계열 회귀 탐지 (Welch's t-test, Cohen's d)
+    promptComparison.ts # 프롬프트 버전 A/B 비교
+    chainAnalysis.ts # observation 체인 병목 분석
+    costQuality.ts   # 비용-품질 트레이드오프 분석
+    recurrence.ts    # 재발 패턴 감지
+    fixPlan.ts       # 수정 계획 생성 (EnrichedContext 지원)
     priority.ts      # 우선순위 산정
+  actions/           # 행동 레이어 (Phase 2: Closed Loop)
+    promptFix.ts     # 진단→프롬프트 수정 컨텍스트 생성
+    evalRunner.ts    # 데이터셋 기반 평가 실행
+    autofix.ts       # 전체 파이프라인 오케스트레이션
   validation/        # 검증 레이어
     schemas.ts       # Zod 스키마 (아키텍처 제약)
     invariants.ts    # 도메인 불변조건 (코드 강제)
@@ -83,10 +96,10 @@ src/
     selfTrace.ts     # 자기 관찰 (Langfuse)
     telemetry.ts     # 텔레메트리
   server/            # MCP 서버
-    mcpServer.ts     # 서버 및 tool 정의
+    mcpServer.ts     # 서버 및 tool 정의 (18개 도구)
     config.ts        # 설정 로딩
-  storage/           # SQLite 캐시
-  utils/             # 공통 유틸리티
+  storage/           # SQLite 캐시 + 클러스터 해결 이력
+  utils/             # 공통 유틸리티 (stats.ts 포함)
   types.ts           # 공유 타입 정의
 config/
   playbooks.yaml     # 휴리스틱 규칙 설정
