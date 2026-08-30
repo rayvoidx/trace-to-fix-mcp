@@ -3,7 +3,7 @@
  *
  * 해결된 클러스터를 기록하여 재발 탐지에 사용.
  */
-import { getDb } from "./sqlite.js";
+import { getDb, persist } from "./sqlite.js";
 
 export interface ResolvedCluster {
   cluster_id: string;
@@ -26,12 +26,8 @@ export async function markClusterResolved(
      VALUES (?, ?, datetime('now'), ?, ?)`,
     [clusterId, fingerprint, note ?? null, JSON.stringify(data)],
   );
-  // Persist
-  const { writeFileSync } = await import("node:fs");
-  const exported = db.export();
-  const path = process.env.CACHE_DB_PATH ?? "./cache/analysis.db";
-  const { resolve } = await import("node:path");
-  writeFileSync(resolve(path), Buffer.from(exported));
+  // 해결 이력은 재발 탐지의 근거 데이터 — 즉시 flush
+  persist();
 }
 
 /** Get all resolved clusters */
@@ -60,10 +56,10 @@ export async function findMatchingResolved(
   const db = await getDb();
   const result = new Map<string, ResolvedCluster>();
 
+  const stmt = db.prepare(
+    "SELECT cluster_id, fingerprint, resolved_at, resolution_note, data FROM resolved_clusters WHERE fingerprint = ?",
+  );
   for (const fp of fingerprints) {
-    const stmt = db.prepare(
-      "SELECT cluster_id, fingerprint, resolved_at, resolution_note, data FROM resolved_clusters WHERE fingerprint = ?",
-    );
     stmt.bind([fp]);
     if (stmt.step()) {
       const row = stmt.getAsObject() as Record<string, unknown>;
@@ -75,8 +71,9 @@ export async function findMatchingResolved(
         data: JSON.parse(row.data as string),
       });
     }
-    stmt.free();
+    stmt.reset();
   }
+  stmt.free();
 
   return result;
 }

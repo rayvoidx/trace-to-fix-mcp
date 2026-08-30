@@ -10,10 +10,16 @@ const LfScoreListResponseSchema = z.object({
 });
 
 export async function fetchScores(traceId: string): Promise<LfScore[]> {
-  const raw = await lfGet<unknown>("/scores", {
-    traceId,
-    limit: "100",
-  });
-  const res = LfScoreListResponseSchema.parse(raw);
-  return res.data;
+  const results: LfScore[] = [];
+  for (let page = 1; ; page++) {
+    const raw = await lfGet<unknown>("/scores", {
+      traceId,
+      limit: "100",
+      page: String(page),
+    });
+    const res = LfScoreListResponseSchema.parse(raw);
+    results.push(...res.data);
+    if (res.data.length < 100 || page >= res.meta.totalPages) break;
+  }
+  return results;
 }

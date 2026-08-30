@@ -1,7 +1,11 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// 패키지 루트 기준 경로 — MCP 클라이언트가 임의 CWD로 spawn해도 리소스를 찾는다
+const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 import { fetchTraces } from "../adapters/langfuse/traces.js";
 import { fetchObservations } from "../adapters/langfuse/observations.js";
@@ -130,7 +134,7 @@ export function createServer(): McpServer {
         const candidates = filterCandidates(traces, config, input.filters);
         const tagged = tagCandidateReasons(candidates, config.thresholds);
 
-        await cacheSet("trace_list", `${args.time_from}_${args.time_to}`, tagged, 30);
+        await cacheSet("trace_list", "latest", tagged, 30);
 
         return tagged.map((t) => ({
           trace_id: t.trace_id,
@@ -223,18 +227,14 @@ export function createServer(): McpServer {
 
     try {
       const result = await selfTrace(toolName, { args }, async () => {
-        let traces: NormalizedTrace[];
-
-        if (args.trace_ids?.length) {
-          const cachedList = await cacheGet("trace_list", "latest") as NormalizedTrace[] | null;
-          if (cachedList) {
-            traces = cachedList.filter((t) => args.trace_ids!.includes(t.trace_id));
-          } else {
-            return { error: "trace_ids 지정 시 먼저 lf_list_failing_traces로 조회해주세요." };
-          }
-        } else {
+        const cachedList = await cacheGet("trace_list", "latest") as NormalizedTrace[] | null;
+        if (!cachedList) {
           return { error: "먼저 lf_list_failing_traces를 호출하여 분석 대상을 조회해주세요." };
         }
+
+        const traces = args.trace_ids?.length
+          ? cachedList.filter((t) => args.trace_ids!.includes(t.trace_id))
+          : cachedList;
 
         if (traces.length === 0) {
           return { clusters: [], message: "일치하는 trace가 없습니다." };
@@ -553,13 +553,14 @@ export function createServer(): McpServer {
 
     try {
       const result = await selfTrace(toolName, { args }, async () => {
-        const reports = [];
-        for (const traceId of args.trace_ids) {
-          const observations = await fetchObservations(traceId);
-          const report = analyzeChain(traceId, observations);
-          withGuardrail(toolName, validateChainAnalysisOutput, report);
-          reports.push(report);
-        }
+        const reports = await Promise.all(
+          args.trace_ids.map(async (traceId) => {
+            const observations = await fetchObservations(traceId);
+            const report = analyzeChain(traceId, observations);
+            withGuardrail(toolName, validateChainAnalysisOutput, report);
+            return report;
+          }),
+        );
 
         if (args.aggregate && reports.length > 1) {
           return aggregateChains(reports);
@@ -953,7 +954,7 @@ export function createServer(): McpServer {
     "resource://playbooks/root-cause-heuristics",
     { description: "실패 원인 추정 규칙 모음 (heuristic rules)" },
     () => {
-      const content = readFileSync(resolve("src/resources/playbooks/root-cause-heuristics.md"), "utf-8");
+      const content = readFileSync(resolve(PKG_ROOT, "src/resources/playbooks/root-cause-heuristics.md"), "utf-8");
       return { contents: [{ uri: "resource://playbooks/root-cause-heuristics", text: content }] };
     },
   );
@@ -963,7 +964,7 @@ export function createServer(): McpServer {
     "resource://templates/github-issue",
     { description: "GitHub issue body 템플릿" },
     () => {
-      const content = readFileSync(resolve("src/resources/templates/github-issue.md"), "utf-8");
+      const content = readFileSync(resolve(PKG_ROOT, "src/resources/templates/github-issue.md"), "utf-8");
       return { contents: [{ uri: "resource://templates/github-issue", text: content }] };
     },
   );
@@ -998,7 +999,7 @@ export function createServer(): McpServer {
       },
     },
     (args) => {
-      const template = readFileSync(resolve("src/prompts/diagnoseCluster.md"), "utf-8");
+      const template = readFileSync(resolve(PKG_ROOT, "src/prompts/diagnoseCluster.md"), "utf-8");
       const filled = template.replace("{{cluster_json}}", args.cluster_json);
       return { messages: [{ role: "user", content: { type: "text", text: filled } }] };
     },
@@ -1014,7 +1015,7 @@ export function createServer(): McpServer {
       },
     },
     (args) => {
-      const template = readFileSync(resolve("src/prompts/draftIssue.md"), "utf-8");
+      const template = readFileSync(resolve(PKG_ROOT, "src/prompts/draftIssue.md"), "utf-8");
       const filled = template.replace("{{analysis_json}}", args.analysis_json);
       return { messages: [{ role: "user", content: { type: "text", text: filled } }] };
     },
@@ -1030,7 +1031,7 @@ export function createServer(): McpServer {
       },
     },
     (args) => {
-      const template = readFileSync(resolve("src/prompts/fixExperimentPlan.md"), "utf-8");
+      const template = readFileSync(resolve(PKG_ROOT, "src/prompts/fixExperimentPlan.md"), "utf-8");
       const filled = template.replace("{{fix_plan_json}}", args.fix_plan_json);
       return { messages: [{ role: "user", content: { type: "text", text: filled } }] };
     },

@@ -91,7 +91,7 @@ cp .env.example .env
 |---|---|
 | `lf_list_failing_traces` | 실패 trace 목록 조회 (점수, latency, 에러 필터) |
 | `lf_get_trace_bundle` | 특정 trace의 observations + scores 전체 조회 |
-| `lf_group_failure_patterns` | 실패 trace를 fingerprint 기반 클러스터로 그룹화 |
+| `lf_group_failure_patterns` | 실패 trace를 fingerprint 기반 클러스터로 그룹화 (`trace_ids` 생략 시 최근 조회 목록 전체 사용) |
 | `lf_suggest_fix_plan` | 클러스터 기반 수정 계획 생성 |
 | `gh_create_issue_draft` | GitHub 이슈 초안 생성 (dry_run 지원) |
 | `export_markdown_report` | 분석 결과를 Markdown 보고서로 내보내기 |
@@ -137,6 +137,14 @@ cp .env.example .env
 # 또는 한 번에 자동 실행
 lf_autofix → 1~7단계를 자동으로 실행하고 결과 보고
 ```
+
+## 성능 & 신뢰성
+
+- **병렬 조회**: 다중 trace의 observation 조회(`lf_analyze_chain`, `lf_autofix`)와 현재/베이스라인 기간 조회를 병렬 실행 — trace 5개 기준 벤치마크 429ms → 92ms (4.6배)
+- **캐시 flush 병합**: SQLite 캐시 쓰기를 100ms 윈도우로 병합 — 클러스터 20개 저장 기준 20.8ms → 3.1ms (6.8배). 클러스터 해결 이력은 즉시 flush
+- **페이지네이션**: observation/score가 100건을 초과해도 전체 수집
+- **타임아웃**: Langfuse API 호출에 30초 타임아웃 — 응답 지연 시 도구가 무한 대기하지 않음
+- **경로 안정성**: 리소스·설정 파일을 모듈 기준 경로로 해석 — MCP 클라이언트가 어떤 CWD로 서버를 실행해도 동작
 
 ## 개발
 

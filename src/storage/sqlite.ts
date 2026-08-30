@@ -34,10 +34,23 @@ export async function getDb(): Promise<Database> {
   return db;
 }
 
-function persist(): void {
+export function persist(): void {
   if (!db) return;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
   const data = db.export();
   writeFileSync(dbPath, Buffer.from(data));
+}
+
+// 쓰기마다 전체 DB export를 피하기 위해 flush를 병합한다
+// (클러스터 20개 연속 저장 = 디스크 쓰기 1회)
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePersist(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(persist, 100);
 }
 
 export async function cacheGet(type: string, key: string): Promise<unknown | null> {
@@ -75,7 +88,7 @@ export async function cacheSet(
      VALUES (?, ?, ?, ?, datetime('now'), ?)`,
     [id, type, key, JSON.stringify(data), expiresAt],
   );
-  persist();
+  schedulePersist();
 }
 
 export async function saveCluster(
@@ -89,7 +102,7 @@ export async function saveCluster(
      VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
     [clusterId, fingerprint, JSON.stringify(data)],
   );
-  persist();
+  schedulePersist();
 }
 
 export async function getCluster(clusterId: string): Promise<unknown | null> {

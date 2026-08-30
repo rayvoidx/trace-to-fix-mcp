@@ -114,6 +114,8 @@ config/
 
 ## 규칙
 
+- 캐시 키는 쓰는 쪽과 읽는 쪽이 같은 상수를 공유할 것 (2026-08: trace_list를 시간 범위 키로 저장하고 "latest"로 읽어 클러스터링 파이프라인 전체가 침묵 실패한 사례)
+- 파일 경로는 CWD가 아닌 모듈 기준(`import.meta.url`)으로 해석할 것 — MCP 클라이언트는 임의 CWD로 서버를 spawn한다
 - Node.js >= 20, ESM (`"type": "module"`)
 - import 경로에 `.js` 확장자 필수 (ESM 규칙)
 - 환경 변수: `.env.example` 참고, 민감 정보는 절대 커밋하지 않는다

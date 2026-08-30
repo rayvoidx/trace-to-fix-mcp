@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import type { PlaybookConfig } from "../types.js";
 
@@ -18,7 +19,11 @@ let cached: PlaybookConfig | null = null;
 export function loadPlaybookConfig(): PlaybookConfig {
   if (cached) return cached;
 
-  const configPath = resolve("config/playbooks.yaml");
+  // 패키지 루트 기준 — MCP 클라이언트가 임의 CWD로 spawn해도 설정을 찾는다
+  const configPath = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../config/playbooks.yaml",
+  );
   if (!existsSync(configPath)) {
     cached = DEFAULT_CONFIG;
     return cached;

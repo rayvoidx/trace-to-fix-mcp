@@ -7,7 +7,7 @@
  * 자동으로 프롬프트를 수정하지 않는다 (사용자 확인 필요).
  * 대신 모든 단계를 실행하고 사용자에게 판단 재료를 제공한다.
  */
-import type { NormalizedTrace, FailureCluster, FixPlan } from "../types.js";
+import type { FailureCluster, FixPlan } from "../types.js";
 import { clusterTraces } from "../diagnosis/clustering.js";
 import { rankClusters } from "../diagnosis/priority.js";
 import { generateFixPlan, type EnrichedContext } from "../diagnosis/fixPlan.js";
@@ -65,13 +65,6 @@ export async function runAutofix(input: AutofixInput): Promise<AutofixReport> {
   logger.info({ input }, "Starting autofix pipeline");
 
   // ─── 1단계: 데이터 수집 ──────────────────────────────────────
-  const currentTraces = await fetchTraces({
-    time_from: input.time_from,
-    time_to: input.time_to,
-    filters: { trace_name: input.trace_name ? [input.trace_name] : undefined },
-    limit: maxTraces,
-  });
-
   // 베이스라인 (자동 계산 또는 사용자 지정)
   const currentFrom = new Date(input.time_from);
   const currentTo = new Date(input.time_to);
@@ -79,12 +72,20 @@ export async function runAutofix(input: AutofixInput): Promise<AutofixReport> {
   const baseFrom = input.baseline_from ?? new Date(currentFrom.getTime() - durationMs).toISOString();
   const baseTo = input.baseline_to ?? input.time_from;
 
-  const baselineTraces = await fetchTraces({
-    time_from: baseFrom,
-    time_to: baseTo,
-    filters: { trace_name: input.trace_name ? [input.trace_name] : undefined },
-    limit: maxTraces,
-  });
+  const [currentTraces, baselineTraces] = await Promise.all([
+    fetchTraces({
+      time_from: input.time_from,
+      time_to: input.time_to,
+      filters: { trace_name: input.trace_name ? [input.trace_name] : undefined },
+      limit: maxTraces,
+    }),
+    fetchTraces({
+      time_from: baseFrom,
+      time_to: baseTo,
+      filters: { trace_name: input.trace_name ? [input.trace_name] : undefined },
+      limit: maxTraces,
+    }),
+  ]);
 
   if (currentTraces.length === 0) {
     return emptyReport(currentTraces.length, baselineTraces.length, "현재 기간에 trace가 없습니다.");
@@ -120,11 +121,11 @@ export async function runAutofix(input: AutofixInput): Promise<AutofixReport> {
   let chainAnalysis: AggregateChainReport | null = null;
   if (topCluster && topCluster.representative_trace_ids.length > 0) {
     try {
-      const chainReports = [];
-      for (const tid of topCluster.representative_trace_ids.slice(0, 5)) {
-        const obs = await fetchObservations(tid);
-        chainReports.push(analyzeChain(tid, obs));
-      }
+      const chainReports = await Promise.all(
+        topCluster.representative_trace_ids.slice(0, 5).map(async (tid) =>
+          analyzeChain(tid, await fetchObservations(tid)),
+        ),
+      );
       if (chainReports.length > 1) {
         chainAnalysis = aggregateChains(chainReports);
       }

@@ -45,6 +45,7 @@ export async function lfGet<T>(path: string, params?: Record<string, string>): P
 
   const res = await fetch(url.toString(), {
     headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) {
@@ -60,6 +61,7 @@ export async function lfPost<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { Authorization: authHeader(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) {
